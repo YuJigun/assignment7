@@ -1,5 +1,6 @@
 package com.example.assignment7;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
@@ -54,6 +55,9 @@ public class MainFragment extends Fragment {
             public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
                 String forecast = mForecastAdapter.getItem(position);
                 Toast.makeText(getActivity(), forecast, Toast.LENGTH_SHORT).show();
+                Intent intent = new Intent(getActivity(), DetailActivity.class);
+                intent.putExtra("data", forecast);
+                startActivity(intent);
             }
         });
 
