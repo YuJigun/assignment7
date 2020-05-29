@@ -3,6 +3,7 @@ package com.example.assignment7;
 
 import android.app.Fragment;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.AsyncTask;
@@ -42,6 +43,19 @@ import java.util.List;
 public class MainFragment extends Fragment {
 
     private ArrayAdapter<String> mForecastAdapter;
+    private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action.equals(FetchWeatherService.ACTION_RETRIEVE_WEATHER_DATA)) {
+                String[] data = intent.getStringArrayExtra(FetchWeatherService.EXTRA_WEATHER_DATA);
+                mForecastAdapter.clear();
+                for(String dayForecastStr : data) {
+                    mForecastAdapter.add(dayForecastStr);
+                }
+            }
+        }
+    };
 
     public MainFragment() {
 
@@ -69,10 +83,9 @@ public class MainFragment extends Fragment {
         return super.onOptionsItemSelected(item);
     }
     private void refreshWeatherData() {
-        FetchWeatherTask weatherTask = new FetchWeatherTask();
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
-        String cityId = prefs.getString("city", "1835847");
-        weatherTask.execute(cityId);
+        Intent intent = new Intent(getActivity(), FetchWeatherService.class);
+        intent.setAction(FetchWeatherService.ACTION_RETRIEVE_WEATHER_DATA);
+        getActivity().startService(intent);
     }
 
     @Override
@@ -110,169 +123,14 @@ public class MainFragment extends Fragment {
                 intent.putExtra("data", forecast);
             }
         });
-
+        IntentFilter intentFilter = new IntentFilter(FetchWeatherService.ACTION_RETRIEVE_WEATHER_DATA);
+        getActivity().registerReceiver(mBroadcastReceiver, intentFilter);
         return rootView;
     }
 
-    public class FetchWeatherTask extends AsyncTask<String, Void, String[]> {
-
-        private final String LOG_TAG = FetchWeatherTask.class.getSimpleName();
-
-        private String getReadableDateString(long time){
-            SimpleDateFormat shortenedDataFormat = new SimpleDateFormat("EEE MMM dd");
-            return shortenedDataFormat.format(time);
-        }
-
-        private String formatHighLows(double hign, double low) {
-            float high;
-            long roundedHigh = Math.round(high);
-            long roundedLow = Math.round(low);
-
-            String highLowStr = roundedHigh + "/" + roundedLow;
-            return highLowStr;
-        }
-
-        private String[] getWeatherDataFromJson(String forecastJsonStr, int numDays)
-                throws JSONException {
-
-            final String OWM_LIST = "list";
-            final String OWM_WEATHER = "weather";
-            final String OWM_TEMPERATURE = "temp";
-            final String OWM_MAX = "max";
-            final String OWM_MIN = "min";
-            final String OWM_DESCRIPTION = "main";
-
-            JSONObject forecastJson = new JSONObject(forecastJsonStr);
-            JSONArray weatherArray = forecastJson.getJSONArray(OWM_LIST);
-
-            Time dayTime = new Time();
-            dayTime.setToNow();
-
-            int julianStartDay = Time.getJulianDay(System.currentTimeMillis(), dayTime.gmtoff);
-
-            dayTime = new Time();
-
-            String[] resultStrs = new String[numDays];
-            for(int i = 0; i < weatherArray.length(); i++) {
-                String day;
-                String description;
-                String highAndLow;
-
-                JSONObject dayForecast = weatherArray.getJSONObject(i);
-
-                long dateTime;
-                dayTime = dayTime.setJulianDay(julianStartDay+i);
-                day = getReadableDateString(dateTime);
-
-                JSONObject weatherObject = dayForecast.getJSONArray(OWM_WEATHER).getJSONObject(0);
-                description = weatherObject.getString(OWM_DESCRIPTION);
-
-                JSONObject temperatureObject = dayForecast.getJSONObject(OWM_TEMPERATURE);
-                double high = temperatureObject.getDouble(OWM_MAX);
-                double low = temperatureObject.getDouble(OWM_MIN);
-
-                highAndLow = formatHighLows(high, low);
-                resultStrs[i] = day + " - " + description + " - " + highAndLow;
-            }
-
-            for (String s : resultStrs) {
-                Log.v(LOG_TAG, "Forecast entry: " + s);
-            }
-            return resultStrs;
-        }
-
-        @Override
-        protected String[] doInBackground(String... params) {
-
-            if (params.length == 0) {
-                return null;
-            }
-            HttpURLConnection urlConnection = null;
-            BufferedReader reader = null;
-            String forecastJsonStr = null;
-
-            String format = "json";
-            String units = "metric";
-            int numDays = 7;
-
-            try {
-                final String FORECAST_BASE_URL =
-                        "http://api.openweathermap.org/data/2.5/forecast/daily?";
-                final String QUERY_PARAM = "id";
-                final String FORMAT_PARAM = "mode";
-                final String UNITS_PARAM = "units";
-                final String DAYS_PARAM = "cnt";
-                final String APPID_PARAM = "APPID";
-
-                Uri builtUri = Uri.parse(FORECAST_BASE_URL).buildUpon()
-                        .appendQueryParameter(QUERY_PARAM, params[0])
-                        .appendQueryParameter(FORMAT_PARAM, format)
-                        .appendQueryParameter(UNITS_PARAM, units)
-                        .appendQueryParameter(DAYS_PARAM, Integer.toString(numDays))
-                        .appendQueryParameter(APPID_PARAM, "5fd2f2cde90c1533efb95b19c048a528")
-                        .build();
-
-                URL url = new URL(builtUri.toString());
-
-                Log.v(LOG_TAG, "Built URI " + builtUri.toString());
-
-                urlConnection = (HttpURLConnection) url.openConnection();
-                urlConnection.setRequestMethod("GET");
-                urlConnection.connect();
-
-                InputStream inputStream = urlConnection.getInputStream();
-                StringBuffer buffer = new StringBuffer();
-                if (inputStream == null) {
-                    return null;
-                }
-                reader = new BufferedReader(new InputStreamReader(inputStream));
-
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    buffer.append(line + "\n");
-                }
-
-                if (buffer.length() == 0) {
-                    return null;
-                }
-
-                forecastJsonStr = buffer.toString();
-
-                Log.v(LOG_TAG, "Forecast string: " + forecastJsonStr);
-            } catch (IOException e) {
-                Log.e(LOG_TAG, "Error ", e);
-
-                return null;
-            } finally {
-                if (urlConnection != null) {
-                    urlConnection.disconnect();
-                }
-                if (reader != null) {
-                    try {
-                        reader.close();
-                    } catch (final IOException e) {
-                        Log.e(LOG_TAG, "Error closing stream", e);
-                    }
-                }
-            }
-
-            try {
-                return getWeatherDataFromJson(forecastJsonStr, numDays);
-            } catch (JSONException e) {
-                Log.e(LOG_TAG, e.getMessage(), e);
-                e.printStackTrace();
-            }
-
-            return null;
-        }
-        @Override
-        protected void onPostExecute(String[] result) {
-            if (result != null) {
-                mForecastAdapter.clear();
-                for(String dayForecastStr : result) {
-                    mForecastAdapter.add(dayForecastStr);
-                }
-            }
-        }
+    @Override
+    public void onDestroyView() {
+        getActivity().unregisterReceiver(mBroadcastReceiver);
+        super.onDestroyView();
     }
 }
