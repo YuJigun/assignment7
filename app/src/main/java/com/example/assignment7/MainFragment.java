@@ -2,12 +2,18 @@ package com.example.assignment7;
 
 
 import android.app.Fragment;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.IBinder;
+import android.os.RemoteException;
 import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -40,9 +46,10 @@ import java.util.Arrays;
 import java.util.List;
 
 
-public class MainFragment extends Fragment {
+public class MainFragment<IFetchWeatherService> extends Fragment {
 
     private ArrayAdapter<String> mForecastAdapter;
+    private IFetchWeatherService mService;
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -57,6 +64,34 @@ public class MainFragment extends Fragment {
         }
     };
 
+    private ServiceConnection mServiceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            mService = IFetchWeatherService.Stub.asInterface(service);
+
+            try {
+                mService.registerFetchDataListener(mFetchDataListener);
+            } catch (RemoteException ex) {
+                ex.printStackTrace();
+            }
+        }
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            mService = null;
+        }
+    };
+
+    private IFetchDataListener.Stub mFetchDataListener = new IFetchDataListener.Stub() {
+        @Override
+        public void onWeatherDataRetrieved(String[] data) throws RemoteException {
+            mForecastAdapter.clear();
+            for(String dayForecastStr : data) {
+                mForecastAdapter.add(dayForecastStr);
+            }
+        }
+    } ;
+    private Object AdapterView;
+
     public MainFragment() {
 
     }
@@ -65,6 +100,21 @@ public class MainFragment extends Fragment {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(true);
+
+        getActivity().bindService(new Intent(getActivity(), FetchWeatherService.class), mServiceConnection, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    public void onDestroy() {
+        if (mService != null) {
+            try {
+                mService.unregisterFetchDataListener(mFetchDataListener);
+            } catch (RemoteException ex) {
+                ex.printStackTrace();
+            }
+        }
+        getActivity().unbindService(mServiceConnection);
+        super.onDestroy();
     }
 
     @Override
@@ -82,10 +132,15 @@ public class MainFragment extends Fragment {
 
         return super.onOptionsItemSelected(item);
     }
+
     private void refreshWeatherData() {
-        Intent intent = new Intent(getActivity(), FetchWeatherService.class);
-        intent.setAction(FetchWeatherService.ACTION_RETRIEVE_WEATHER_DATA);
-        getActivity().startService(intent);
+        if (mService != null) {
+            try {
+                mService.retrieveWeatherData();
+            } catch (RemoteException ex) {
+                ex.printStackTrace();
+            }
+        }
     }
 
     @Override
@@ -117,10 +172,13 @@ public class MainFragment extends Fragment {
         listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
-                String forecast = mForecastAdapter.getItem(position);
-                Toast.makeText(getActivity(), forecast, Toast.LENGTH_SHORT).show();
-                Intent intent = new Intent(getActivity(), DetailActivity.class);
-                intent.putExtra("data", forecast);
+                @Override
+                public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
+                    String forecast = mForecastAdapter.getItem(position);
+                    Toast.makeText(getActivity(), forecast, Toast.LENGTH_SHORT).show();
+                    Intent intent = new Intent(getActivity(), DetailActivity.class);
+                    intent.putExtra("data", forecast);
+                }
             }
         });
         IntentFilter intentFilter = new IntentFilter(FetchWeatherService.ACTION_RETRIEVE_WEATHER_DATA);
