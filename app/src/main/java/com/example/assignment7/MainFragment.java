@@ -3,9 +3,11 @@ package com.example.assignment7;
 
 import android.app.Fragment;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -60,12 +62,17 @@ public class MainFragment extends Fragment {
     public boolean onOptionItemSelected(MenuItem item) {
         int id = item.getItemId();
         if (id == R.id.action_refresh) {
-            FetchWeatherTask weatherTask = new FetchWeatherTask();
-            weatherTask.execute("1835847");
+            refreshWeatherData();
             return true;
         }
 
         return super.onOptionsItemSelected(item);
+    }
+    private void refreshWeatherData() {
+        FetchWeatherTask weatherTask = new FetchWeatherTask();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
+        String cityId = prefs.getString("city", "1835847");
+        weatherTask.execute(cityId);
     }
 
     @Override
@@ -101,7 +108,6 @@ public class MainFragment extends Fragment {
                 Toast.makeText(getActivity(), forecast, Toast.LENGTH_SHORT).show();
                 Intent intent = new Intent(getActivity(), DetailActivity.class);
                 intent.putExtra("data", forecast);
-                startActivity(intent);
             }
         });
 
@@ -118,6 +124,7 @@ public class MainFragment extends Fragment {
         }
 
         private String formatHighLows(double hign, double low) {
+            float high;
             long roundedHigh = Math.round(high);
             long roundedLow = Math.round(low);
 
@@ -175,7 +182,7 @@ public class MainFragment extends Fragment {
         }
 
         @Override
-        protected Void doInBackground(String... params) {
+        protected String[] doInBackground(String... params) {
 
             if (params.length == 0) {
                 return null;
@@ -216,7 +223,6 @@ public class MainFragment extends Fragment {
                 InputStream inputStream = urlConnection.getInputStream();
                 StringBuffer buffer = new StringBuffer();
                 if (inputStream == null) {
-                    // Nothing to do.
                     return null;
                 }
                 reader = new BufferedReader(new InputStreamReader(inputStream));
