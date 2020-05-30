@@ -1,6 +1,7 @@
 package com.example.assignment7;
 
 import android.app.Service;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -8,7 +9,10 @@ import android.os.AsyncTask;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.preference.PreferenceManager;
+import android.text.format.Time;
 import android.util.Log;
+
+import com.example.assignment7.provider.WeatherContract;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -21,12 +25,11 @@ import java.io.InputStreamReader;
 import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.sql.Time;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Vector;
 
-public class FetchWeatherService extends Service {
-    public static final String ACTION_RETRIEVE_WEATHER_DATA = "com.example.assignment7.RETRIEVE_DATA";
+public class FetchWeatherService<IFetchDataListener> extends Service {
+    public static final String ACTION_RETRIEVE_WEATHER_DATA = "com.loyid.weatherforecast.RETRIEVE_DATA";
     public static final String EXTRA_WEATHER_DATA = "weather-data";
     public FetchWeatherService() {
     }
@@ -42,95 +45,30 @@ public class FetchWeatherService extends Service {
     }
 
     @Override
-    public IBinder onBind(Intent intent) { return new FetchWeatherServiceProxy(this); }
-
-    public class FetchWeatherTask extends AsyncTask<String, Void, String[]> {
-        private final String LOG_TAG = FetchWeatherTask.class.getSimpleName();
-        private int mStartId = -1;
-
-        public FetchWeatherTask(int startId) { mStartId = startId; }
-
-        private String getReadableDateString(long time){
-            SimpleDateFormat shortenedDateFormat = new SimpleDateFormat("EEE MMM dd");
-            return shortenedDateFormat.format(time);
-        }
-        private String formatHignLows(double high, double low) {
-            long roundedHigh = Math.round(high);
-            long roundedLow = Math.round(low);
-
-            String highLowStr = roundedHigh + "/" + roundedLow;
-            return highLowStr;
-        }
-
-        private String[] getWeatherDataFromJson(String forecastJsonStr, int numDays)
-                throws JSONException {
-            final String OWM_LIST = "list";
-            final String OWM_WEATHER = "weather";
-            final String OWM_TEMPERATURE = "temp";
-            final String OWM_MAX = "max";
-            final String OWM_MIN = "min";
-            final String OWM_DESCRIPTION = "main";
-
-            JSONObject forecastJson = new JSONObject(forecastJsonStr);
-            JSONArray weatherArray = forecastJson.getJSONArray(OWM_LIST);
-
-            Time dayTime = new Time();
-            dayTime.setToNow();
-
-            int julianStartDay = Time.getJulianDay(System.currentTimeMillis(), dayTime.gmtoff);
-
-            dayTime = new Time();
-            String[] resultStrs = new String[numDays];
-            for(int i = 0; i < weatherArray.length(); i++) {
-                String day;
-                String description;
-                String highAndLow;
-                JSONObject dayForecast = weatherArray.getJSONObject(i);
-                long dateTime;
-                dateTime = dayTime.setJulianDay(julianStartDay+i);
-                day = getReadableDateString(dateTime);
-                JSONObject weatherObject = dayForecast.getJSONArray(OWM_WEATHER).getJSONObject(0);
-                description = weatherObject.getString(OWM_DESCRIPTION);
-                JSONObject temperatureObject = dayForecast.getJSONObject(OWM_TEMPERATURE);
-                double high = temperatureObject.getDouble(OWM_MAX);
-                double low = temperatureObject.getDouble(OWM_MIN);
-                highAndLow = formatHighLows(high, low);
-                resultStrs[i] = day + " - " + description + " - " + highAndLow;
-            }
-            for (String s : resultStrs) {
-                Log.v(LOG_TAG, "Forecast entry: " + s);
-            }
-            return resultStrs;
-        }
-
+    public IBinder onBind(Intent intent) {
+        return (IBinder) new FetchWeatherServiceProxy(this);
     }
 
-    public class FetchWeatherTask extends AsyncTask<String, Void, String[]> {
+    public class FetchWeatherTask extends AsyncTask<String, Void, Void> {
 
         private final String LOG_TAG = FetchWeatherTask.class.getSimpleName();
         private int mStartId = -1;
 
         public FetchWeatherTask(int startId) {
-            Log.d(LOG_TAG, "asfdasdfafd", new RuntimeException());
             mStartId = startId;
         }
 
-        private String getReadableDateString(long time) {
-            SimpleDateFormat shortenedDateFormat = new SimpleDateFormat("EEE MMM dd");
-            return shortenedDateFormat.format(time);
-        }
-
-        private String formatHighLows(double high, double low) {
-            long roundedHigh = Math.round(high);
-            long roundedLow = Math.round(low);
-
-            String highLowStr = roundedHigh + "/" + roundedLow;
-            return highLowStr;
-        }
-
-        private String[] getWeatherDataFromJson(String forecastJsonStr, int numDays)
+        /**
+         * Take the String representing the complete forecast in JSON Format and
+         * pull out the data we need to construct the Strings needed for the wireframes.
+         *
+         * Fortunately parsing is easy:  constructor takes the JSON string and converts it
+         * into an Object hierarchy for us.
+         */
+        private void getWeatherDataFromJson(String forecastJsonStr, int numDays)
                 throws JSONException {
 
+            // These are the names of the JSON objects that need to be extracted.
             final String OWM_LIST = "list";
             final String OWM_WEATHER = "weather";
             final String OWM_TEMPERATURE = "temp";
@@ -141,61 +79,102 @@ public class FetchWeatherService extends Service {
             JSONObject forecastJson = new JSONObject(forecastJsonStr);
             JSONArray weatherArray = forecastJson.getJSONArray(OWM_LIST);
 
+            // Insert the new weather information into the database
+            Vector<ContentValues> cVVector = new Vector<ContentValues>(weatherArray.length());
+
+
+            // OWM returns daily forecasts based upon the local time of the city that is being
+            // asked for, which means that we need to know the GMT offset to translate this data
+            // properly.
+
+            // Since this data is also sent in-order and the first day is always the
+            // current day, we're going to take advantage of that to get a nice
+            // normalized UTC date for all of our weather.
 
             Time dayTime = new Time();
             dayTime.setToNow();
 
+            // we start at the day returned by local time. Otherwise this is a mess.
             int julianStartDay = Time.getJulianDay(System.currentTimeMillis(), dayTime.gmtoff);
 
+            // now we work exclusively in UTC
             dayTime = new Time();
 
             String[] resultStrs = new String[numDays];
-            for (int i = 0; i < weatherArray.length(); i++) {
+            for(int i = 0; i < weatherArray.length(); i++) {
+                // For now, using the format "Day, description, hi/low"
                 String day;
                 String description;
                 String highAndLow;
 
+                // Get the JSON object representing the day
                 JSONObject dayForecast = weatherArray.getJSONObject(i);
 
+                // The date/time is returned as a long.  We need to convert that
+                // into something human-readable, since most people won't read "1400356800" as
+                // "this saturday".
                 long dateTime;
-                dateTime = dayTime.setJulianDay(julianStartDay + i);
-                day = getReadableDateString(dateTime);
+                // Cheating to convert this to UTC time, which is what we want anyhow
+                dateTime = dayTime.setJulianDay(julianStartDay+i);
 
+                // description is in a child array called "weather", which is 1 element long.
                 JSONObject weatherObject = dayForecast.getJSONArray(OWM_WEATHER).getJSONObject(0);
                 description = weatherObject.getString(OWM_DESCRIPTION);
 
+                // Temperatures are in a child object called "temp".  Try not to name variables
+                // "temp" when working with temperature.  It confuses everybody.
                 JSONObject temperatureObject = dayForecast.getJSONObject(OWM_TEMPERATURE);
                 double high = temperatureObject.getDouble(OWM_MAX);
                 double low = temperatureObject.getDouble(OWM_MIN);
 
-                highAndLow = formatHighLows(high, low);
-                resultStrs[i] = day + " - " + description + " - " + highAndLow;
+                ContentValues values = new ContentValues();
+                values.put(WeatherContract.WeatherColumns.COLUMN_DATE, dateTime);
+                values.put(WeatherContract.WeatherColumns.COLUMN_SHORT_DESC, description);
+                values.put(WeatherContract.WeatherColumns.COLUMN_MIN_TEMP, low);
+                values.put(WeatherContract.WeatherColumns.COLUMN_MAX_TEMP, high);
+
+                cVVector.add(values);
             }
 
-            for (String s : resultStrs) {
-                Log.v(LOG_TAG, "Forecast entry: " + s);
-            }
-            return resultStrs;
+            // add to database
+            if ( cVVector.size() > 0 ) {
+                Log.d("AAAAAA", "OH YEA");
+                ContentValues[] cvArray = new ContentValues[cVVector.size()];
+                cVVector.toArray(cvArray);
+                getContentResolver().bulkInsert(WeatherContract.WeatherColumns.CONTENT_URI, cvArray);
 
+                // delete old data so we don't build up an endless history
+                getContentResolver().delete(WeatherContract.WeatherColumns.CONTENT_URI,
+                        WeatherContract.WeatherColumns.COLUMN_DATE + " <= ?",
+                        new String[] {Long.toString(dayTime.setJulianDay(julianStartDay-1))});
+                Log.d("AAAAAA", "OH YEA");
+            }
         }
 
         @Override
-        protected String[] doInBackground(String... params) {
+        protected Void doInBackground(String... params) {
 
+            // If there's no zip code, there's nothing to look up.  Verify size of params.
             if (params.length == 0) {
                 return null;
             }
 
+            // These two need to be declared outside the try/catch
+            // so that they can be closed in the finally block.
             HttpURLConnection urlConnection = null;
             BufferedReader reader = null;
 
+            // Will contain the raw JSON response as a string.
             String forecastJsonStr = null;
 
             String format = "json";
             String units = "metric";
-            int numDays = 7;
+            int numDays = 14;
 
             try {
+                // Construct the URL for the OpenWeatherMap query
+                // Possible parameters are avaiable at OWM's forecast API page, at
+                // http://openweathermap.org/API#forecast
                 final String FORECAST_BASE_URL =
                         "http://api.openweathermap.org/data/2.5/forecast/daily?";
                 final String QUERY_PARAM = "id";
@@ -216,30 +195,39 @@ public class FetchWeatherService extends Service {
 
                 Log.v(LOG_TAG, "Built URI " + builtUri.toString());
 
+                // Create the request to OpenWeatherMap, and open the connection
                 urlConnection = (HttpURLConnection) url.openConnection();
                 urlConnection.setRequestMethod("GET");
                 urlConnection.connect();
 
+                // Read the input stream into a String
                 InputStream inputStream = urlConnection.getInputStream();
                 StringBuffer buffer = new StringBuffer();
                 if (inputStream == null) {
+                    // Nothing to do.
                     return null;
                 }
                 reader = new BufferedReader(new InputStreamReader(inputStream));
 
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    // Since it's JSON, adding a newline isn't necessary (it won't affect parsing)
+                    // But it does make debugging a *lot* easier if you print out the completed
+                    // buffer for debugging.
                     buffer.append(line + "\n");
                 }
 
                 if (buffer.length() == 0) {
+                    // Stream was empty.  No point in parsing.
                     return null;
                 }
                 forecastJsonStr = buffer.toString();
 
                 Log.v(LOG_TAG, "Forecast string: " + forecastJsonStr);
-            } catch (IOException | IOException e) {
+            } catch (IOException e) {
                 Log.e(LOG_TAG, "Error ", e);
+                // If the code didn't successfully get the weather data, there's no point in attemping
+                // to parse it.
                 return null;
             } finally {
                 if (urlConnection != null) {
@@ -255,10 +243,9 @@ public class FetchWeatherService extends Service {
             }
 
             try {
-                return getWeatherDataFromJson(forecastJsonStr, numDays);
-            } catch (JSONException e) {
-                Log.e(LOG_TAG, e.getMessage(), e);
-                e.printStackTrace();
+                getWeatherDataFromJson(forecastJsonStr, numDays);
+            } catch (JSONException ex) {
+                ex.printStackTrace();
             }
 
             // This will only happen if there was an error getting or parsing the forecast.
@@ -266,13 +253,9 @@ public class FetchWeatherService extends Service {
         }
 
         @Override
-        protected void onPostExecute(String[] result) {
-            if (result != null) {
-                notifyWeatherDataRetrieved(result);
-            }
-
-            stopSelf(mStartId < 0);
-            return;
+        protected void onPostExecute(Void aVoid) {
+            if (mStartId < 0)
+                return;
 
             stopSelf(mStartId);
         }
@@ -300,7 +283,7 @@ public class FetchWeatherService extends Service {
         weatherTask.execute(cityId);
     }
 
-    private ArrayList<IFetchDataListener> mListeners = new ArrayList<IFetchDataListener>();
+    private final ArrayList<IFetchDataListener> mListeners = new ArrayList<IFetchDataListener>();
     private void registerFetchDataListener(IFetchDataListener listener) {
         synchronized (mListeners) {
             if (mListeners.contains(listener)) {
@@ -333,13 +316,15 @@ public class FetchWeatherService extends Service {
         }
 
         @Override
-        public void registerFetchDataListener(IFetchDataListener listener) throws RemoteException {
-            mService.get().registerFetchDataListener(listener);
+        public void registerFetchDataListener(com.example.assignment7.IFetchDataListener listener) throws RemoteException {
+
         }
 
         @Override
-        public void unregisterFetchDataListener(IFetchDataListener listener) throws RemoteException {
-            mService.get().unregisterFetchDataListener(listener);
+        public void unregisterFetchDataListener(com.example.assignment7.IFetchDataListener listener) throws RemoteException {
+
         }
+
+
     }
 }

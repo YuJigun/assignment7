@@ -8,5 +8,4 @@ interface IFetchWeatherService {
     void retrieveWeatherData();
     void registerFetchDataListener(IFetchDataListener listener);
     void unregisterFetchDataListener(IFetchDataListener listener);
-
 }

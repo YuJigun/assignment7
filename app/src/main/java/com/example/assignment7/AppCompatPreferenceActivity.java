@@ -6,7 +6,7 @@ import android.preference.PreferenceActivity;
 import android.view.MenuInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Toolbar;
+import androidx.appcompat.widget.Toolbar;
 
 import androidx.annotation.LayoutRes;
 import androidx.annotation.Nullable;
@@ -102,6 +102,4 @@ public abstract class AppCompatPreferenceActivity extends PreferenceActivity {
         }
         return mDelegate;
     }
-}
-
 }
