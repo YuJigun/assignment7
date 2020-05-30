@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.Vector;
 
 public class FetchWeatherService<IFetchDataListener> extends Service {
-    public static final String ACTION_RETRIEVE_WEATHER_DATA = "com.loyid.weatherforecast.RETRIEVE_DATA";
+    public static final String ACTION_RETRIEVE_WEATHER_DATA = "com.example.assignment7.RETRIEVE_DATA";
     public static final String EXTRA_WEATHER_DATA = "weather-data";
     public FetchWeatherService() {
     }
@@ -261,19 +261,19 @@ public class FetchWeatherService<IFetchDataListener> extends Service {
         }
     }
 
+
     private void notifyWeatherDataRetrieved(String[] result) {
         synchronized (mListeners) {
             for (IFetchDataListener listener : mListeners) {
-                try {
-                    listener.onWeatherDataRetrieved(result);
-                } catch (RemoteException ex) {
-                    ex.printStackTrace();
-                }
+                listener(result);
             }
         }
         Intent intent = new Intent(ACTION_RETRIEVE_WEATHER_DATA);
         intent.putExtra(EXTRA_WEATHER_DATA, result);
         sendBroadcast(intent);
+    }
+
+    private void listener(String[] result) {
     }
 
     private void retrieveWeatherData(int startId) {
